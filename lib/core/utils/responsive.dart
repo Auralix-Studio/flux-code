@@ -19,7 +19,7 @@ extension ResponsiveContext on BuildContext {
   bool get isExpanded => screenSize == ScreenSize.expanded;
 
   /// Móvil real: gestos táctiles, controles grandes, orientación gestionada.
-  bool get isMobilePlatform => Platform.isAndroid || Platform.isIOS;
+  bool get isMobilePlatform => Platform.isAndroid || Platform.isIOS || Platform.isWindows;
 
   /// Escritorio: teclado, hover, ventana redimensionable.
   bool get isDesktopPlatform =>

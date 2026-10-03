@@ -10,9 +10,9 @@ import '../tizen_client.dart';
 import '../tv_discovery.dart';
 
 class CastDialog extends ConsumerStatefulWidget {
-  const CastDialog({super.key, required this.candidate});
+  const CastDialog({super.key, this.candidate});
 
-  final StreamCandidate candidate;
+  final StreamCandidate? candidate;
 
   static Future<void> show(BuildContext context, StreamCandidate candidate) {
     return showDialog(
@@ -26,69 +26,90 @@ class CastDialog extends ConsumerStatefulWidget {
 }
 
 class _CastDialogState extends ConsumerState<CastDialog> {
+  late TVDiscoveryNotifier _discovery;
+  bool _busy = false;
+  String? _error;
+
   @override
   void initState() {
     super.initState();
+    _discovery = ref.read(tvDiscoveryProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(tvDiscoveryProvider.notifier).startDiscovery();
+      if (mounted) _discovery.startDiscovery();
     });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        ref.read(tvDiscoveryProvider.notifier).stopDiscovery();
-      }
-    });
+    _discovery.stopDiscovery();
     super.dispose();
   }
 
   Future<void> _castTo(TVDevice tv) async {
-    final host = widget.candidate.host;
-    final port = widget.candidate.port;
-
-    if (tv.type == 'webos') {
-      final client = SSAPClient(ip: tv.ip);
-      await client.connect();
-      await client.launchApp('com.aur.flux', {
-        'host': host,
-        'port': port,
-        if (widget.candidate.isExternal) 'url': widget.candidate.uri.toString(),
-        if (widget.candidate.httpHeaders != null && widget.candidate.httpHeaders!.isNotEmpty) 
-          'headers': widget.candidate.httpHeaders,
-      });
-      // El client se cerrará después, podemos dejar que haga cleanup con disconnect
-      Future.delayed(const Duration(seconds: 3), () => client.disconnect());
-    } else if (tv.type == 'tizen') {
-      final client = TizenClient(tv.ip);
-      await client.launchApp('com.aur.flux', {
-        'host': host,
-        'port': port,
-        if (widget.candidate.isExternal) 'url': widget.candidate.uri.toString(),
-        if (widget.candidate.httpHeaders != null && widget.candidate.httpHeaders!.isNotEmpty) 
-          'headers': widget.candidate.httpHeaders,
-      });
-    } else if (tv.type == 'flux_app' || tv.type == 'android_tv') {
-      try {
-        final client = HttpClient();
-        final request = await client.postUrl(Uri.parse('http://${tv.ip}:8080/launch'));
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode({
-          'host': host,
-          'port': port,
-          if (widget.candidate.isExternal) 'url': widget.candidate.uri.toString(),
-          if (widget.candidate.httpHeaders != null && widget.candidate.httpHeaders!.isNotEmpty) 
-            'headers': widget.candidate.httpHeaders,
-        }));
-        await request.close();
-        client.close();
-      } catch (e) {
-        debugPrint('[Flux] Error haciendo HTTP post al TV Box: $e');
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final candidate = widget.candidate;
+    final params = <String, dynamic>{
+      if (candidate != null) ...{
+        'host': candidate.host,
+        'port': candidate.port,
+        'url': candidate.uri.toString(),
+        'isExternal': candidate.isExternal,
+        if (candidate.httpHeaders?.isNotEmpty ?? false)
+          'headers': candidate.httpHeaders,
+      },
+    };
+    try {
+      if (tv.type == 'webos') {
+        final client = SSAPClient(ip: tv.ip);
+        try {
+          await client.connect();
+          await client.launchApp('com.aur.flux', params);
+        } finally {
+          client.disconnect();
+        }
+      } else if (tv.type == 'tizen') {
+        final sent = await TizenClient(tv.ip).launchApp('com.aur.flux', params);
+        if (!sent) throw StateError('No se pudo enviar el comando a Samsung.');
+      } else {
+        if (candidate == null) {
+          throw StateError(
+            'En Android TV abre Flux con el mando de la TV primero. Luego puedes enviar videos desde aquí.',
+          );
+        }
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 4);
+        try {
+          final request = await client
+              .postUrl(Uri.parse('http://${tv.ip}:8080/launch'))
+              .timeout(const Duration(seconds: 4));
+          request.headers.contentType = ContentType.json;
+          request.write(jsonEncode(params));
+          final response = await request.close().timeout(
+            const Duration(seconds: 6),
+          );
+          if (response.statusCode != HttpStatus.ok) {
+            throw HttpException(
+              'La TV rechazó el comando (${response.statusCode}).',
+            );
+          }
+        } finally {
+          client.close(force: true);
+        }
       }
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted)
+        setState(
+          () => _error =
+              'No se pudo abrir Flux. Verifica que esté instalado y acepta el emparejamiento en la TV.\n$e',
+        );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -96,10 +117,24 @@ class _CastDialogState extends ConsumerState<CastDialog> {
     final devices = ref.watch(tvDiscoveryProvider);
 
     return AlertDialog(
-      title: const Text('Transmitir a...'),
+      title: Text(
+        widget.candidate == null ? 'Abrir Flux en TV' : 'Transmitir a...',
+      ),
       content: SizedBox(
         width: 300,
-        child: devices.isEmpty
+        child: _busy
+            ? const Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Acepta la conexión en tu TV…'),
+                  ],
+                ),
+              )
+            : devices.isEmpty
             ? const Padding(
                 padding: EdgeInsets.all(24.0),
                 child: Column(
@@ -107,7 +142,10 @@ class _CastDialogState extends ConsumerState<CastDialog> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 16),
-                    Text('Buscando dispositivos en la red...', textAlign: TextAlign.center),
+                    Text(
+                      'Buscando dispositivos en la red...',
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               )
@@ -118,7 +156,9 @@ class _CastDialogState extends ConsumerState<CastDialog> {
                   final tv = devices[index];
                   return ListTile(
                     leading: Icon(
-                      (tv.type == 'webos' || tv.type == 'tizen') ? Icons.tv : Icons.ad_units,
+                      (tv.type == 'webos' || tv.type == 'tizen')
+                          ? Icons.tv
+                          : Icons.ad_units,
                     ),
                     title: Text(tv.name),
                     subtitle: Text(tv.ip),
@@ -128,6 +168,18 @@ class _CastDialogState extends ConsumerState<CastDialog> {
               ),
       ),
       actions: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        TextButton(
+          onPressed: _busy ? null : _discovery.startDiscovery,
+          child: const Text('Buscar de nuevo'),
+        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),

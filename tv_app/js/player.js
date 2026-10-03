@@ -88,9 +88,12 @@ function FluxPlayer(video, handlers) {
     applyPipelineHints();
     video.autoplay = false;
     video.preload = 'auto';
-    video.src = opts.bustCache
-      ? candidate.url + '?flux=' + Date.now()
-      : candidate.url;
+    
+    var finalUrl = candidate.url;
+    if (opts.bustCache && !candidate.isExternal) {
+      finalUrl += '?flux=' + Date.now();
+    }
+    video.src = finalUrl;
 
     try {
       video.load();
@@ -284,6 +287,7 @@ function FluxPlayer(video, handlers) {
 
   function check() {
     if (destroyed || checking || !candidate || !following) { return; }
+    if (candidate.isExternal) { return; } // No inspeccionamos la red para enlaces externos
     checking = true;
 
     FluxNet.inspect(
@@ -390,21 +394,28 @@ function FluxPlayer(video, handlers) {
     scheduleReconnect();
   }
 
+  function onBuffer() { emit('onBuffer'); }
+  function onWaiting() { emit('onWaiting'); }
+  function onPlaying() {
+    lastProgressAt = Date.now();
+    emit('onPlaying');
+    if (FluxConfig.debugEvents) { console.log('video.playing'); }
+  }
+  function onPausedEvent() { emit('onPaused'); }
+  function onEndedEvent() {
+    if (destroyed) { return; }
+    emit('onEnded');
+    check();
+  }
+
   video.addEventListener('loadedmetadata', onMeta, false);
   video.addEventListener('timeupdate', onTimeUpdate, false);
   video.addEventListener('seeked', onSeeked, false);
-  video.addEventListener('progress', function () { emit('onBuffer'); }, false);
-  video.addEventListener('waiting', function () { emit('onWaiting'); }, false);
-  video.addEventListener('playing', function () {
-    lastProgressAt = Date.now();
-    emit('onPlaying');
-  }, false);
-  video.addEventListener('pause', function () { emit('onPaused'); }, false);
-  video.addEventListener('ended', function () {
-    // Terminar también puede significar que el emisor pasó al siguiente.
-    emit('onEnded');
-    check();
-  }, false);
+  video.addEventListener('progress', onBuffer, false);
+  video.addEventListener('waiting', onWaiting, false);
+  video.addEventListener('playing', onPlaying, false);
+  video.addEventListener('pause', onPausedEvent, false);
+  video.addEventListener('ended', onEndedEvent, false);
   video.addEventListener('error', onError, false);
 
   this.getAudioTracks = function () {
@@ -464,6 +475,11 @@ function FluxPlayer(video, handlers) {
     video.removeEventListener('loadedmetadata', onMeta, false);
     video.removeEventListener('timeupdate', onTimeUpdate, false);
     video.removeEventListener('seeked', onSeeked, false);
+    video.removeEventListener('progress', onBuffer, false);
+    video.removeEventListener('waiting', onWaiting, false);
+    video.removeEventListener('playing', onPlaying, false);
+    video.removeEventListener('pause', onPausedEvent, false);
+    video.removeEventListener('ended', onEndedEvent, false);
     video.removeEventListener('error', onError, false);
     try {
       video.pause();

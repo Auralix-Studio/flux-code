@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/video_classifier.dart';
 import '../data/youtube_extractor.dart';
-import '../data/video_verifier.dart';
 
 class BrowserState {
   const BrowserState({
@@ -30,6 +29,8 @@ class BrowserState {
 
 class BrowserController extends Notifier<BrowserState> {
   late final VideoClassifier _classifier;
+  final Set<String> _extracting = {};
+  int _generation = 0;
 
   @override
   BrowserState build() {
@@ -46,47 +47,65 @@ class BrowserController extends Notifier<BrowserState> {
   }
 
   void clearCandidates() {
+    _generation++;
     state = state.copyWith(candidates: []);
   }
 
-  Future<void> addVideo(String url, {double? duration, String? source, int? width, int? height, bool isLikelyAd = false, String? referer, String? poster}) async {
+  Future<void> addVideo(
+    String url, {
+    double? duration,
+    String? source,
+    int? width,
+    int? height,
+    bool isLikelyAd = false,
+    String? referer,
+    String? poster,
+  }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !['http', 'https'].contains(uri.scheme) ||
+        uri.host.isEmpty)
+      return;
+    if (state.candidates.any((v) => v.url == url)) return;
     // 1. YouTube extractor
     if (YouTubeExtractor.isYouTubeUrl(url)) {
-      final ytVideo = await YouTubeExtractor.extractVideo(url);
-      if (ytVideo != null) {
-        _insertCandidate(ytVideo);
+      if (!_extracting.add(url)) return;
+      final generation = _generation;
+      try {
+        final ytVideo = await YouTubeExtractor.extractVideo(url);
+        if (ref.mounted && generation == _generation && ytVideo != null) {
+          _insertCandidate(ytVideo);
+        }
+      } finally {
+        _extracting.remove(url);
       }
-      return; // Stop here if it's youtube
+      return;
     }
 
     // 2. Generic Classifier
     final classified = _classifier.classify(
-      url, 
-      duration: duration, 
-      isLikelyAd: isLikelyAd, 
+      url,
+      duration: duration,
+      isLikelyAd: isLikelyAd,
       referer: referer,
       width: width,
       height: height,
       source: source,
       poster: poster,
     );
-    
-    // 3. Verifier (verify real links to avoid false positives)
-    if (classified.type != VideoType.ad) {
-       final isValid = await VideoVerifier.verifyUrl(url, referer: referer);
-       if (!isValid) return; // Drop invalid or dead links
-    }
 
+    // Verify on selection, with the browser headers, instead of probing every resource.
     _insertCandidate(classified);
   }
-  
+
   void _insertCandidate(ClassifiedVideo classified) {
     // Evitar duplicados exactos en la lista final mostrada
     final exists = state.candidates.any((c) => c.url == classified.url);
     if (!exists) {
-      final updated = List<ClassifiedVideo>.from(state.candidates)..add(classified);
-      
-      // Ordenar: Main primero, Unknown después, Ads al final. 
+      final updated = List<ClassifiedVideo>.from(state.candidates)
+        ..add(classified);
+
+      // Ordenar: Main primero, Unknown después, Ads al final.
       // Dentro de cada grupo, mayor confianza o duración primero.
       updated.sort((a, b) {
         if (a.type != b.type) {
@@ -97,12 +116,12 @@ class BrowserController extends Notifier<BrowserState> {
         }
         final confCompare = b.confidence.compareTo(a.confidence);
         if (confCompare != 0) return confCompare;
-        
+
         final aDur = a.duration ?? 0.0;
         final bDur = b.duration ?? 0.0;
         return bDur.compareTo(aDur);
       });
-      
+
       state = state.copyWith(candidates: updated);
     }
   }
@@ -110,5 +129,5 @@ class BrowserController extends Notifier<BrowserState> {
 
 final browserControllerProvider =
     NotifierProvider<BrowserController, BrowserState>(
-  () => BrowserController(),
-);
+      () => BrowserController(),
+    );

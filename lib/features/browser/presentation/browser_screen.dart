@@ -82,6 +82,21 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
     if (effectiveReferer != null) headers['Referer'] = effectiveReferer;
     if (userAgent != null) headers['User-Agent'] = userAgent;
 
+    final cookies = await CookieManager.instance().getCookies(
+      url: WebUri(video.url),
+    );
+    if (cookies.isNotEmpty) {
+      headers['Cookie'] = cookies.map((c) => '${c.name}=${c.value}').join('; ');
+    }
+    if (!mounted) return;
+
+    // Mostrar indicador de carga mientras se extrae y verifica el enlace
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
     // Validar el video con el discovery controller (probing)
     final candidate = await ref
         .read(discoveryControllerProvider.notifier)
@@ -89,6 +104,10 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
           video.url,
           httpHeaders: headers.isEmpty ? null : headers,
         );
+
+    if (mounted) {
+      Navigator.of(context).pop(); // Cerrar diálogo de carga
+    }
 
     if (candidate != null && mounted) {
       if (cast) {
@@ -178,6 +197,14 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
           ),
           actions: [
             IconButton(
+              tooltip: 'Abrir Flux en TV',
+              icon: const Icon(Icons.tv_rounded),
+              onPressed: () => showDialog(
+                context: context,
+                builder: (_) => const CastDialog(),
+              ),
+            ),
+            IconButton(
               icon: const Icon(Icons.arrow_back_ios, size: 20),
               onPressed: () async {
                 if (await _webController?.canGoBack() ?? false) {
@@ -224,8 +251,6 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
               child: InAppWebView(
                 initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
                 initialSettings: InAppWebViewSettings(
-                  userAgent:
-                      'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                   useShouldOverrideUrlLoading: true,
                   mediaPlaybackRequiresUserGesture: false,
                   useOnLoadResource: true,
@@ -268,11 +293,14 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
                   ref
                       .read(browserControllerProvider.notifier)
                       .setLoading(false);
-                  
+
                   if (url != null) {
                     final urlStr = url.toString();
-                    if (urlStr.contains('youtube.com/watch') || urlStr.contains('youtu.be/')) {
-                       ref.read(browserControllerProvider.notifier).addVideo(urlStr);
+                    if (urlStr.contains('youtube.com/watch') ||
+                        urlStr.contains('youtu.be/')) {
+                      ref
+                          .read(browserControllerProvider.notifier)
+                          .addVideo(urlStr);
                     }
                   }
 
@@ -285,13 +313,14 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
                 onUpdateVisitedHistory: (controller, url, isReload) {
                   if (url != null) {
                     final urlStr = url.toString();
-                    ref
-                        .read(browserControllerProvider.notifier)
-                        .setUrl(urlStr);
+                    ref.read(browserControllerProvider.notifier).setUrl(urlStr);
                     _urlController.text = urlStr;
-                    
-                    if (urlStr.contains('youtube.com/watch') || urlStr.contains('youtu.be/')) {
-                       ref.read(browserControllerProvider.notifier).addVideo(urlStr);
+
+                    if (urlStr.contains('youtube.com/watch') ||
+                        urlStr.contains('youtu.be/')) {
+                      ref
+                          .read(browserControllerProvider.notifier)
+                          .addVideo(urlStr);
                     }
                   }
                 },
@@ -320,7 +349,10 @@ class _BrowserScreenState extends ConsumerState<BrowserScreen> {
                   // Pasar TODAS las URLs al detector — él decide internamente
                   // si coincide con algún patrón de streaming.
                   final url = resource.url.toString();
-                  _detector.interceptNativeResource(url);
+                  _detector.interceptNativeResource(
+                    url,
+                    referer: state.currentUrl,
+                  );
                 },
                 onCreateWindow: (controller, createWindowAction) async {
                   debugPrint(
@@ -544,7 +576,10 @@ class _VideoCard extends StatelessWidget {
                                 width: 100,
                                 height: 70,
                                 color: Colors.black26,
-                                child: const Icon(Icons.image_not_supported_rounded, color: Colors.white54),
+                                child: const Icon(
+                                  Icons.image_not_supported_rounded,
+                                  color: Colors.white54,
+                                ),
                               );
                             },
                           ),
@@ -608,14 +643,14 @@ class _VideoCard extends StatelessWidget {
                             _Chip(
                               icon: Icons.timer_outlined,
                               text:
-                                  "\${(video.duration! / 60).floor()}:\${(video.duration! % 60).toInt().toString().padLeft(2, '0')} min",
+                                  "${(video.duration! / 60).floor()}:${(video.duration! % 60).toInt().toString().padLeft(2, '0')} min",
                             ),
                           if (video.width != null &&
                               video.height != null &&
                               video.width! > 0)
                             _Chip(
                               icon: Icons.hd_outlined,
-                              text: '\${video.width}x\${video.height}',
+                              text: '${video.width}x${video.height}',
                             ),
                           if (video.source != null)
                             _Chip(

@@ -28,14 +28,31 @@ class ClassifiedVideo {
 
 class VideoClassifier {
   VideoClassifier({AdBlockList? adBlockList})
-      : _adBlockList = adBlockList ?? AdBlockList();
+    : _adBlockList = adBlockList ?? AdBlockList();
 
   final AdBlockList _adBlockList;
 
-  ClassifiedVideo classify(String url, {double? duration, bool isLikelyAd = false, String? referer, int? width, int? height, String? source, String? poster}) {
+  ClassifiedVideo classify(
+    String url, {
+    double? duration,
+    bool isLikelyAd = false,
+    String? referer,
+    int? width,
+    int? height,
+    String? source,
+    String? poster,
+  }) {
     final uri = Uri.tryParse(url);
     if (uri == null) {
-      return ClassifiedVideo(url: url, type: VideoType.unknown, referer: referer, width: width, height: height, source: source, poster: poster);
+      return ClassifiedVideo(
+        url: url,
+        type: VideoType.unknown,
+        referer: referer,
+        width: width,
+        height: height,
+        source: source,
+        poster: poster,
+      );
     }
 
     // 1. Si el detector ya lo marcó como anuncio (por dominio o duración corta)
@@ -68,39 +85,24 @@ class VideoClassifier {
       );
     }
 
-    // 3. Check duration (short videos are often ads)
-    if (duration != null) {
-      if (duration < 30) {
-        return ClassifiedVideo(
-          url: url,
-          type: VideoType.ad,
-          confidence: 0.6,
-          duration: duration,
-          referer: referer,
-          width: width,
-          height: height,
-          source: source,
-          poster: poster,
-        );
-      } else {
-        // Long videos are likely the main content
-        return ClassifiedVideo(
-          url: url,
-          type: VideoType.main,
-          confidence: 0.7,
-          duration: duration,
-          referer: referer,
-          width: width,
-          height: height,
-          source: source,
-          poster: poster,
-        );
-      }
+    // Duration alone does not identify an advertisement.
+    if (duration != null && duration >= 90) {
+      return ClassifiedVideo(
+        url: url,
+        type: VideoType.main,
+        confidence: 0.7,
+        duration: duration,
+        referer: referer,
+        width: width,
+        height: height,
+        source: source,
+        poster: poster,
+      );
     }
 
     // 4. Fallback based on URL patterns
     final path = uri.path.toLowerCase();
-    if (path.contains('ad') || path.contains('sponsor') || path.contains('preroll')) {
+    if (RegExp(r'(^|[/_.-])(ads?|sponsor|preroll)([/_.-]|$)').hasMatch(path)) {
       return ClassifiedVideo(
         url: url,
         type: VideoType.ad,

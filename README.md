@@ -180,6 +180,22 @@ flutter test
 flutter build apk --release
 ```
 
+### Instalador para Windows
+
+Para compilar la aplicación y generar el instalador ejecutable (`.exe`) con asistente de configuración y opción de acceso directo en el escritorio:
+
+- **Con doble clic**: Ejecuta `build_installer.bat` en la raíz del proyecto.
+- **Desde PowerShell**:
+  ```powershell
+  .\scripts\build_installer.ps1
+  ```
+- Si ya compilaste Flutter previamente y solo deseas reempaquetar el instalador:
+  ```powershell
+  .\scripts\build_installer.ps1 -SkipFlutterBuild
+  ```
+
+El instalador generado se guardará en `build\installer\Flux_Setup_vX.Y.Z.exe`.
+
 ## Ajustes
 
 Casi todo lo tocable está en
@@ -205,3 +221,17 @@ Limitaciones conocidas:
 - Si el router tiene aislamiento de clientes (AP isolation), ningún escaneo
   puede funcionar; hay que desactivarlo en el router.
 - Sin soporte para HTTPS con certificado autofirmado.
+
+## Navegador y apertura remota de TV
+
+- El navegador detecta URLs de video y manifiestos HLS/DASH, incluyendo respuestas fetch/XHR identificadas por Content-Type. Descarta segmentos individuales antes de enviarlos al detector.
+- La detección no descarga cada candidato para verificarlo: se comprueba al seleccionarlo, con Referer, User-Agent y cookies del navegador. Las comprobaciones cancelan el cuerpo de la respuesta para evitar descargar un archivo completo cuando el servidor ignora Range.
+- Los videos cortos no se consideran anuncios solo por su duración.
+- El botón **Abrir Flux en TV** permite solicitar la apertura de la aplicación instalada en LG webOS y Samsung Tizen sin elegir un video. Hay que aceptar el emparejamiento en el televisor. LG espera la confirmación del lanzamiento; Samsung espera la autorización y envía la solicitud, sin confirmar que la aplicación haya terminado de abrir.
+- El descubrimiento hace un barrido por solicitud, se detiene al cerrar el diálogo y puede repetirse con **Buscar de nuevo**.
+- En Android TV el receptor HTTP necesita Flux abierto. Esta función no instala aplicaciones, no enciende la TV ni implementa un mando universal. La reproducción de contenido protegido o que requiera cabeceras depende del reproductor de cada TV.
+
+Validación de estos ajustes: pruebas de detección/clasificación y respuestas de lanzamiento webOS con servidor local simulado. Emparejamiento y reproducción en hardware real pendientes.
+
+## Versiones y publicación
+Consulta [RELEASES.md](RELEASES.md). La fuente de versión es pubspec.yaml; el instalador recibe esa versión automáticamente. La web pública está en ../Webs/flux y el destino de releases se configura en release.config.json.

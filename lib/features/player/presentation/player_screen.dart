@@ -77,18 +77,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _fastForwarding = false;
   double _originalRate = 1.0;
 
-  bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+  bool get _isMobile => Platform.isAndroid || Platform.isIOS || Platform.isWindows;
 
   @override
   void initState() {
     super.initState();
     _controller.initialize();
-    // En móviles, inicia adaptándose a la pantalla natural sin forzar inmersivo
-    if (!_isMobile && _fullscreen) {
+    _controller.addListener(_onControllerStateChanged);
+    
+    if (_isMobile) {
+      _fullscreen = true;
+      _enterImmersive();
+    } else if (_fullscreen) {
       windowManager.setFullScreen(true);
     }
+    
     _restartHideTimer();
     if (ref.read(settingsProvider).followSource) _startWatching();
+  }
+
+  bool _popping = false;
+
+  void _onControllerStateChanged() {
+    if (_controller.fatalError != null && !_popping && mounted) {
+      _popping = true;
+      final error = _controller.fatalError!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error),
+        duration: const Duration(seconds: 4),
+      ));
+      Navigator.of(context).maybePop();
+    }
   }
 
   @override
@@ -224,14 +243,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   Future<void> _toggleFullscreen() async {
     final next = !_fullscreen;
-    if (_isMobile) {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      await windowManager.setFullScreen(next);
+    } else {
       if (next) {
         await _enterImmersive();
       } else {
         await _exitImmersive();
       }
-    } else {
-      await windowManager.setFullScreen(next);
     }
     if (mounted) setState(() => _fullscreen = next);
   }
@@ -445,7 +464,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       ),
                     if (_fastForwarding)
                       const _SpeedFeedback(),
-                    _ErrorOverlay(controller: _controller),
                   ],
                 );
               },
@@ -797,66 +815,3 @@ class _SpeedFeedback extends StatelessWidget {
   }
 }
 
-/// Solo aparece cuando la reconexión automática se ha rendido. Hasta entonces
-/// el usuario ve el aviso discreto de "reconectando" y la reproducción se
-/// recupera sola.
-class _ErrorOverlay extends StatelessWidget {
-  const _ErrorOverlay({required this.controller});
-
-  final PlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final error = controller.fatalError;
-        if (error == null) return const SizedBox.shrink();
-
-        return Container(
-          color: Colors.black87,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.all(32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.cloud_off_rounded,
-                    size: 44, color: Colors.white70),
-                const SizedBox(height: 16),
-                Text(
-                  error,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, height: 1.4),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Comprueba que la transmisión sigue activa en el teléfono.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      child: const Text('Volver'),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton.icon(
-                      onPressed: controller.retry,
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Reintentar'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}

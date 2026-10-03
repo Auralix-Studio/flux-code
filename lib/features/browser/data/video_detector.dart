@@ -75,10 +75,6 @@ class VideoDetector {
     'undertone.com',
   };
 
-  /// Umbral de duración para marcar como "probable anuncio" cuando no hay
-  /// información de dominio. Ajustable. 90 segundos es conservador.
-  static const double _adDurationThresholdSeconds = 90.0;
-
   // ══════════════════════════════════════════════════════════════════════════
   // Script JS inyectado en la página
   // ══════════════════════════════════════════════════════════════════════════
@@ -165,6 +161,8 @@ class VideoDetector {
     if (!url.startsWith('http')) {
       try { url = new URL(url, document.baseURI).href; } catch(e) { return; }
     }
+    if (!/^https?:/i.test(url)) return;
+    if (/\\.(ts|m4s|aac|vtt|srt|png|jpg|jpeg|gif|css|js)(\\?|\$|#)/i.test(url)) return;
     const clean = url.split('#')[0];
     if (seen.has(clean)) return;
     seen.add(clean);
@@ -203,7 +201,13 @@ class VideoDetector {
       const arg = arguments[0];
       const url = (typeof arg === 'string') ? arg : (arg && arg.url);
       if (url && isMediaUrl(url)) notify(url, 'fetch');
-      return origFetch.apply(this, arguments);
+      return origFetch.apply(this, arguments).then(function(response) {
+        const mime = (response.headers.get('content-type') || '').toLowerCase();
+        if ((mime.startsWith('video/') && !mime.includes('mp2t') && !mime.includes('iso.segment')) || mime.includes('mpegurl') || mime.includes('dash+xml')) {
+          notify(response.url || url, 'fetch');
+        }
+        return response;
+      });
     };
   } catch(e) {}
 
@@ -213,6 +217,12 @@ class VideoDetector {
     XMLHttpRequest.prototype.open = function() {
       const url = arguments[1];
       if (url && typeof url === 'string' && isMediaUrl(url)) notify(url, 'xhr');
+      this.addEventListener('load', function() {
+        const mime = (this.getResponseHeader('content-type') || '').toLowerCase();
+        if ((mime.startsWith('video/') && !mime.includes('mp2t') && !mime.includes('iso.segment')) || mime.includes('mpegurl') || mime.includes('dash+xml')) {
+          notify(this.responseURL || url, 'xhr');
+        }
+      }, { once: true });
       return origOpen.apply(this, arguments);
     };
   } catch(e) {}
@@ -326,12 +336,12 @@ class VideoDetector {
   ///
   /// FIXED Bug 2: los segmentos .ts/.m4s se suprimen aquí.
   /// Solo se reportan masters (.m3u8/.mpd) y contenedores completos (.mp4…).
-  void interceptNativeResource(String url) {
+  void interceptNativeResource(String url, {String? referer}) {
     // Ignorar cualquier archivo no deseado (fragmentos, imágenes, etc.)
     if (_ignoredPattern.hasMatch(url)) return;
 
     if (_masterPattern.hasMatch(url) || _streamingPathPattern.hasMatch(url)) {
-      _process(url: url, source: 'network');
+      _process(url: url, source: 'network', referer: referer);
     }
   }
 
@@ -347,7 +357,11 @@ class VideoDetector {
     String? poster,
   }) {
     final clean = _stripFragment(url);
-    if (clean.isEmpty) return;
+    final uri = Uri.tryParse(clean);
+    if (uri == null ||
+        !['http', 'https'].contains(uri.scheme) ||
+        uri.host.isEmpty)
+      return;
 
     // Suprimir segmentos individuales (HLS/DASH) y otros ignorados SIEMPRE.
     // Reproducir un fragmento .ts o .m4s falla rápidamente y traba el reproductor.
@@ -387,13 +401,6 @@ class VideoDetector {
         return true;
       }
     } catch (_) {}
-
-    // 2. Clip muy corto → probable pre-roll/mid-roll
-    if (duration != null &&
-        duration > 0 &&
-        duration < _adDurationThresholdSeconds) {
-      return true;
-    }
 
     return false;
   }

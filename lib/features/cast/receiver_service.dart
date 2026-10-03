@@ -13,7 +13,7 @@ final castReceiverProvider = Provider<CastReceiverService>((ref) {
 class CastReceiverService {
   HttpServer? _server;
   RawDatagramSocket? _udpSocket;
-  Function(String host, int port, {String? url})? onPlayCommand;
+  Function(String host, int port, {String? url, Map<String, String>? headers})? onPlayCommand;
 
   /// Rango de puertos UDP a intentar para discovery. Si el primero está
   /// ocupado (otra instancia de Flux en la misma máquina, o test local)
@@ -46,8 +46,13 @@ class CastReceiverService {
             final port = data['port'] as int?;
             final url = data['url'] as String?;
             
+            Map<String, String>? headers;
+            if (data['headers'] != null) {
+              headers = Map<String, String>.from(data['headers']);
+            }
+            
             if (host != null && port != null && onPlayCommand != null) {
-              onPlayCommand!(host, port, url: url);
+              onPlayCommand!(host, port, url: url, headers: headers);
               request.response
                 ..headers.add('Access-Control-Allow-Origin', '*')
                 ..statusCode = HttpStatus.ok

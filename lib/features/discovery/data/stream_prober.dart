@@ -40,7 +40,8 @@ class StreamProber {
   late final HttpClient _client = HttpClient()
     ..connectionTimeout = config.probeTimeout
     ..idleTimeout = const Duration(seconds: 3)
-    ..autoUncompress = false // los bytes medidos deben ser los bytes reales
+    ..autoUncompress =
+        false // los bytes medidos deben ser los bytes reales
     ..userAgent = 'Flux/1.0';
 
   void dispose() => _client.close(force: true);
@@ -73,24 +74,30 @@ class StreamProber {
       // Algunos servidores embebidos no implementan HEAD. Reintentamos con un
       // GET mínimo (un solo byte) antes de descartar el host.
       if (response == null || !_isUsableStatus(response.statusCode)) {
-        await response?.drain<void>().catchError((_) {});
+        await response?.listen(null).cancel().catchError((_) {});
         response = await _rangeHead(uri);
       }
-      if (response == null || !_isUsableStatus(response.statusCode)) return null;
+      if (response == null || !_isUsableStatus(response.statusCode))
+        return null;
 
       return _fromHeaders(host, port, response.headers, source);
     } on Object {
       return null;
     } finally {
       // Nunca dejamos una conexión colgando en el teléfono que sirve el video.
-      unawaited(response?.drain<void>().catchError((_) {}) ?? Future.value());
+      unawaited(
+        response?.listen(null).cancel().catchError((_) {}) ?? Future.value(),
+      );
     }
   }
 
   static bool _isUsableStatus(int status) =>
       status == HttpStatus.ok || status == HttpStatus.partialContent;
 
-  Future<HttpClientResponse?> _head(Uri uri, {Map<String, String>? httpHeaders}) async {
+  Future<HttpClientResponse?> _head(
+    Uri uri, {
+    Map<String, String>? httpHeaders,
+  }) async {
     final request = await _client.headUrl(uri).timeout(config.probeTimeout);
     request.followRedirects = false;
     request.persistentConnection = false;
@@ -100,7 +107,10 @@ class StreamProber {
     return request.close().timeout(config.probeTimeout);
   }
 
-  Future<HttpClientResponse?> _rangeHead(Uri uri, {Map<String, String>? httpHeaders}) async {
+  Future<HttpClientResponse?> _rangeHead(
+    Uri uri, {
+    Map<String, String>? httpHeaders,
+  }) async {
     final request = await _client.getUrl(uri).timeout(config.probeTimeout);
     request.followRedirects = false;
     request.persistentConnection = false;
@@ -112,7 +122,7 @@ class StreamProber {
     return response;
   }
 
-  /// Comprueba una URL de Internet directamente, sin usar `isAllowedTarget` 
+  /// Comprueba una URL de Internet directamente, sin usar `isAllowedTarget`
   /// (porque ya se validó con `isAllowedExternalUri`) y usando un timeout más largo.
   Future<StreamCandidate?> probeExternal(
     Uri uri, {
@@ -123,30 +133,42 @@ class StreamProber {
     try {
       response = await _head(uri, httpHeaders: httpHeaders);
       if (response == null || !_isUsableStatus(response.statusCode)) {
-        await response?.drain<void>().catchError((_) {});
+        await response?.listen(null).cancel().catchError((_) {});
         response = await _rangeHead(uri, httpHeaders: httpHeaders);
       }
-      if (response == null || !_isUsableStatus(response.statusCode)) return null;
+      if (response == null || !_isUsableStatus(response.statusCode))
+        return null;
 
       final host = uri.host;
       final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
 
-      var candidate = _fromHeaders(host, port, response.headers, source, explicitUri: uri, httpHeaders: httpHeaders);
-      
+      var candidate = _fromHeaders(
+        host,
+        port,
+        response.headers,
+        source,
+        explicitUri: uri,
+        httpHeaders: httpHeaders,
+      );
+
       // Si fallan las cabeceras HTTP pero la URL claramente apunta a un video,
       // lo aceptamos de todos modos (muchos servidores son vagos con el Content-Type).
       if (candidate == null && _videoExtensions.hasMatch(uri.path)) {
         final headers = response.headers;
         final disposition = headers.value('content-disposition');
-        final acceptRanges = headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase() ?? '';
-        
+        final acceptRanges =
+            headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase() ?? '';
+
         candidate = StreamCandidate(
           host: host,
           port: port,
           source: source,
           explicitUri: uri,
           fileName: fileNameFrom(disposition),
-          contentType: headers.value(HttpHeaders.contentTypeHeader)?.toLowerCase().trim(),
+          contentType: headers
+              .value(HttpHeaders.contentTypeHeader)
+              ?.toLowerCase()
+              .trim(),
           sizeBytes: _contentLength(headers),
           seekable: acceptRanges.contains('bytes'),
           lastModified: _lastModified(headers),
@@ -158,7 +180,9 @@ class StreamProber {
     } on Object {
       return null;
     } finally {
-      unawaited(response?.drain<void>().catchError((_) {}) ?? Future.value());
+      unawaited(
+        response?.listen(null).cancel().catchError((_) {}) ?? Future.value(),
+      );
     }
   }
 
@@ -170,8 +194,10 @@ class StreamProber {
     Uri? explicitUri,
     Map<String, String>? httpHeaders,
   }) {
-    final contentType =
-        headers.value(HttpHeaders.contentTypeHeader)?.toLowerCase().trim();
+    final contentType = headers
+        .value(HttpHeaders.contentTypeHeader)
+        ?.toLowerCase()
+        .trim();
     final disposition = headers.value('content-disposition');
     final fileName = fileNameFrom(disposition);
     final length = _contentLength(headers);
@@ -237,7 +263,8 @@ class StreamProber {
         return _MediaKind.playlist;
       }
       if (contentType.startsWith('audio/')) return _MediaKind.file;
-      final isOpaque = contentType.startsWith('application/octet-stream') ||
+      final isOpaque =
+          contentType.startsWith('application/octet-stream') ||
           contentType.startsWith('binary/');
       if (isOpaque) {
         return (fileName != null && _videoExtensions.hasMatch(fileName))
@@ -258,9 +285,10 @@ class StreamProber {
   /// `filename="x.mkv"` como el `filename*=UTF-8''x%20y.mkv` de RFC 5987.
   static String? fileNameFrom(String? disposition) {
     if (disposition == null) return null;
-    final extended =
-        RegExp(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", caseSensitive: false)
-            .firstMatch(disposition);
+    final extended = RegExp(
+      r"filename\*\s*=\s*[^']*'[^']*'([^;]+)",
+      caseSensitive: false,
+    ).firstMatch(disposition);
     if (extended != null) {
       try {
         return Uri.decodeComponent(extended.group(1)!.trim());
@@ -268,9 +296,10 @@ class StreamProber {
         // Cae al formato simple.
       }
     }
-    final simple =
-        RegExp(r'filename\s*=\s*"?([^";]+)"?', caseSensitive: false)
-            .firstMatch(disposition);
+    final simple = RegExp(
+      r'filename\s*=\s*"?([^";]+)"?',
+      caseSensitive: false,
+    ).firstMatch(disposition);
     final name = simple?.group(1)?.trim();
     if (name == null || name.isEmpty) return null;
     return name;
@@ -324,8 +353,10 @@ class StreamProber {
     final request = await _client.getUrl(uri).timeout(config.probeTimeout);
     request.followRedirects = false;
     request.persistentConnection = false;
-    request.headers
-        .set(HttpHeaders.rangeHeader, 'bytes=$offset-${offset + maxBytes - 1}');
+    request.headers.set(
+      HttpHeaders.rangeHeader,
+      'bytes=$offset-${offset + maxBytes - 1}',
+    );
 
     final response = await request.close().timeout(config.probeTimeout);
     if (!_isUsableStatus(response.statusCode)) {

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,7 +7,24 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val signingProperties = Properties()
+val signingFile = rootProject.file("key.properties")
+if (signingFile.exists()) signingFile.inputStream().use { signingProperties.load(it) }
+if (System.getenv("FLUX_RELEASE_BUILD") == "1" && !signingFile.exists()) {
+    throw GradleException("Publishing requires android/key.properties and a release keystore.")
+}
+
 android {
+    signingConfigs {
+        if (signingFile.exists()) {
+            create("release") {
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+                storeFile = file(requireNotNull(signingProperties.getProperty("storeFile")))
+                storePassword = signingProperties.getProperty("storePassword")
+            }
+        }
+    }
     namespace = "com.aur.flux"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -32,9 +51,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
+            // Local development may use debug; the publication pipeline requires a release key.
             // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (signingFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
 }

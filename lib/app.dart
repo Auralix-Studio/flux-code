@@ -23,7 +23,7 @@ class _FluxAppState extends ConsumerState<FluxApp> {
     super.initState();
     // Iniciar servicio receptor para permitir que otras instancias de Flux puedan enviar transmisiones aquí
     final receiver = ref.read(castReceiverProvider);
-    receiver.onPlayCommand = (host, port, {url}) {
+    receiver.onPlayCommand = (host, port, {url, headers}) {
       // Ejecutar navegación en el UI thread principal
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final explicitUri = url != null ? Uri.tryParse(url) : null;
@@ -32,10 +32,13 @@ class _FluxAppState extends ConsumerState<FluxApp> {
           port: port,
           source: explicitUri != null ? DiscoverySource.directLink : DiscoverySource.manual,
           explicitUri: explicitUri,
+          httpHeaders: headers,
           fileName: 'Recibiendo emisión',
           seekable: true,
         );
         
+        // Evitar abrir múltiples pantallas de reproducción apiladas
+        navigatorKey.currentState?.popUntil((route) => route.isFirst);
         navigatorKey.currentState?.push(
           MaterialPageRoute(
             builder: (context) => PlayerScreen(candidate: candidate),

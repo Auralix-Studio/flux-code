@@ -496,7 +496,12 @@
       },
       onStalled: function () { showBanner('La imagen se quedó parada. Recuperando…', true); },
       onEnded: function () { showBanner('Terminó. Esperando a lo siguiente…'); },
-      onFatal: function (message) { showError(message); }
+      onFatal: function (message) { 
+        showError(message); 
+        setTimeout(function() {
+          leavePlayer();
+        }, 4000);
+      }
     });
     player.start(candidate);
     updateFollowHint();

@@ -18,6 +18,7 @@ var FluxDiscovery = (function () {
       host: raw.host,
       port: raw.port,
       url: raw.url,
+      isExternal: !!raw.isExternal,
       fileName: fileName,
       contentType: raw.contentType || null,
       size: raw.size || null,

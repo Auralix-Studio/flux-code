@@ -28,15 +28,20 @@ class TVDevice {
   int get hashCode => ip.hashCode ^ type.hashCode;
 }
 
-final tvDiscoveryProvider = NotifierProvider<TVDiscoveryNotifier, List<TVDevice>>(() {
-  return TVDiscoveryNotifier();
-});
+final tvDiscoveryProvider =
+    NotifierProvider<TVDiscoveryNotifier, List<TVDevice>>(() {
+      return TVDiscoveryNotifier();
+    });
 
 class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
   @override
-  List<TVDevice> build() => [];
+  List<TVDevice> build() {
+    ref.onDispose(stopDiscovery);
+    return [];
+  }
 
-  Timer? _scanTimer;
+  bool _active = false;
+  bool _scanning = false;
   RawDatagramSocket? _udpSocket;
 
   /// IPs locales del dispositivo (todas las interfaces), para excluirlas de
@@ -44,40 +49,45 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
   final _localIps = <String>{};
 
   void startDiscovery() {
+    _active = true;
     _scan();
-    // Re-escaneo periódico
-    _scanTimer?.cancel();
-    _scanTimer = Timer.periodic(const Duration(seconds: 15), (_) => _scan());
   }
 
   void stopDiscovery() {
-    _scanTimer?.cancel();
+    _active = false;
     _udpSocket?.close();
     _udpSocket = null;
   }
 
   Future<void> _scan() async {
-    // Averiguar nuestras propias IPs para no detectarnos a nosotros mismos.
-    await _detectLocalIps();
+    if (_scanning) return;
+    _scanning = true;
+    try {
+      // Averiguar nuestras propias IPs para no detectarnos a nosotros mismos.
+      await _detectLocalIps();
 
-    final subnet = await SubnetDetector().preferred();
-    if (subnet == null) return;
+      final subnet = await SubnetDetector().preferred();
+      if (subnet == null || !_active) return;
 
-    // También añadir la IP local de la subred preferida por si no estaba.
-    _localIps.add(subnet.localIp);
+      // También añadir la IP local de la subred preferida por si no estaba.
+      _localIps.add(subnet.localIp);
 
-    final hosts = subnet.hosts()
-        .where((h) => !_localIps.contains(h))
-        .toList();
+      final hosts = subnet
+          .hosts()
+          .where((h) => !_localIps.contains(h))
+          .toList();
 
-    // 1. UDP Broadcast para Android TVs (Flux Receivers)
-    _discoverAndroidTVs();
+      // 1. UDP Broadcast para Android TVs (Flux Receivers)
+      await _discoverAndroidTVs();
 
-    // 2. TCP: detectar otros Flux vía HTTP /info (puerto 8080)
-    _discoverFluxReceivers(hosts);
+      // 2. TCP: detectar otros Flux vía HTTP /info (puerto 8080)
+      final receivers = _discoverFluxReceivers(hosts);
 
-    // 3. TCP Port Scan para webOS (puerto 3000 SSAP) y Tizen (puerto 8001/8002 MSF)
-    _discoverSmartTVs(hosts);
+      // 3. TCP Port Scan para webOS (puerto 3000 SSAP) y Tizen (puerto 8001/8002 MSF)
+      await Future.wait([receivers, _discoverSmartTVs(hosts)]);
+    } finally {
+      _scanning = false;
+    }
   }
 
   /// Obtiene las IPs locales del dispositivo para filtrar auto-detección.
@@ -102,6 +112,11 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
     try {
       if (_udpSocket == null) {
         _udpSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+        if (!_active) {
+          _udpSocket!.close();
+          _udpSocket = null;
+          return;
+        }
         _udpSocket!.broadcastEnabled = true;
         _udpSocket!.listen((RawSocketEvent event) {
           if (event == RawSocketEvent.read) {
@@ -116,7 +131,7 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
                 // parts[3] = instanceId (optional)
                 String os = parts.length > 2 ? parts[2] : '';
                 String instanceId = parts.length > 3 ? parts[3] : '';
-                
+
                 // Evitar agregarnos a nosotros mismos — por instanceId y por IP.
                 if (instanceId == appInstanceId) return;
                 if (_localIps.contains(dg.address.address)) return;
@@ -130,23 +145,27 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
                   deviceName = 'Flux TV Box';
                 }
 
-                _addDevice(TVDevice(
-                  ip: dg.address.address,
-                  type: 'flux_app',
-                  name: deviceName,
-                ));
+                _addDevice(
+                  TVDevice(
+                    ip: dg.address.address,
+                    type: 'flux_app',
+                    name: deviceName,
+                  ),
+                );
               }
             }
           }
         });
       }
-      
+
       // Enviar a todos los puertos UDP posibles del rango del receiver,
       // ya que el otro Flux podría estar en cualquiera de ellos.
       final msg = utf8.encode('FLUX_DISCOVER');
-      for (var port = CastReceiverService.udpPortStart;
-           port <= CastReceiverService.udpPortEnd;
-           port++) {
+      for (
+        var port = CastReceiverService.udpPortStart;
+        port <= CastReceiverService.udpPortEnd;
+        port++
+      ) {
         _udpSocket!.send(msg, InternetAddress('255.255.255.255'), port);
       }
     } catch (e) {
@@ -158,20 +177,25 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
   /// Esto funciona incluso cuando el UDP falló por conflicto de puertos.
   Future<void> _discoverFluxReceivers(List<String> hosts) async {
     final gate = Semaphore(32);
-    
+
     await Future.wait([
       for (final host in hosts)
         gate.run(() async {
+          if (!_active) return;
+          final client = HttpClient()
+            ..connectionTimeout = const Duration(milliseconds: 500);
           try {
-            final client = HttpClient()
-              ..connectionTimeout = const Duration(milliseconds: 500);
             final request = await client.getUrl(
               Uri.parse('http://$host:8080/info'),
             );
-            final response = await request.close()
-                .timeout(const Duration(seconds: 2));
+            final response = await request.close().timeout(
+              const Duration(seconds: 2),
+            );
             if (response.statusCode == 200) {
-              final body = await response.transform(utf8.decoder).join();
+              final body = await response
+                  .transform(utf8.decoder)
+                  .join()
+                  .timeout(const Duration(seconds: 2));
               try {
                 final data = jsonDecode(body);
                 if (data is Map &&
@@ -190,19 +214,18 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
                     deviceName = 'Flux TV Box';
                   }
 
-                  _addDevice(TVDevice(
-                    ip: host,
-                    type: 'flux_app',
-                    name: deviceName,
-                  ));
+                  _addDevice(
+                    TVDevice(ip: host, type: 'flux_app', name: deviceName),
+                  );
                 }
               } catch (_) {
                 // Respuesta no es JSON válido — ignorar.
               }
             }
-            client.close(force: true);
           } on Object {
             // Puerto cerrado, timeout o error de red — continuar.
+          } finally {
+            client.close(force: true);
           }
         }),
     ]);
@@ -211,29 +234,43 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
   Future<void> _discoverSmartTVs(List<String> hosts) async {
     final gate = Semaphore(32);
     final ports = [3000, 8001, 8002];
-    
+
     await Future.wait([
       for (final host in hosts)
         gate.run(() async {
+          if (!_active) return;
           for (final port in ports) {
             try {
-              final socket = await Socket.connect(host, port,
-                  timeout: const Duration(milliseconds: 400));
+              final socket = await Socket.connect(
+                host,
+                port,
+                timeout: const Duration(milliseconds: 400),
+              );
               socket.destroy();
-              
+
               if (port == 3000) {
-                _addDevice(TVDevice(ip: host, type: 'webos', name: 'LG webOS TV'));
+                _addDevice(
+                  TVDevice(ip: host, type: 'webos', name: 'LG webOS TV'),
+                );
                 break;
               } else {
                 // Tizen MSF API (8001/8002)
+                final client = HttpClient()
+                  ..connectionTimeout = const Duration(seconds: 2);
                 try {
                   final protocol = port == 8002 ? 'https' : 'http';
-                  final client = HttpClient();
                   client.badCertificateCallback = (cert, h, p) => true;
-                  final request = await client.getUrl(Uri.parse('$protocol://$host:$port/api/v2/'));
-                  final response = await request.close().timeout(const Duration(seconds: 2));
+                  final request = await client.getUrl(
+                    Uri.parse('$protocol://$host:$port/api/v2/'),
+                  );
+                  final response = await request.close().timeout(
+                    const Duration(seconds: 2),
+                  );
                   if (response.statusCode == 200) {
-                    final body = await response.transform(utf8.decoder).join();
+                    final body = await response
+                        .transform(utf8.decoder)
+                        .join()
+                        .timeout(const Duration(seconds: 2));
                     final data = jsonDecode(body);
                     final name = data['device']?['name'] ?? 'Samsung Tizen TV';
                     _addDevice(TVDevice(ip: host, type: 'tizen', name: name));
@@ -241,8 +278,12 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
                   }
                 } catch (_) {
                   // Fallback if API fails but port is open
-                  _addDevice(TVDevice(ip: host, type: 'tizen', name: 'Samsung Tizen TV'));
+                  _addDevice(
+                    TVDevice(ip: host, type: 'tizen', name: 'Samsung Tizen TV'),
+                  );
                   break;
+                } finally {
+                  client.close(force: true);
                 }
               }
             } on Object {
@@ -254,9 +295,8 @@ class TVDiscoveryNotifier extends Notifier<List<TVDevice>> {
   }
 
   void _addDevice(TVDevice device) {
-    if (!state.contains(device)) {
+    if (_active && ref.mounted && !state.contains(device)) {
       state = [...state, device];
     }
   }
 }
-
