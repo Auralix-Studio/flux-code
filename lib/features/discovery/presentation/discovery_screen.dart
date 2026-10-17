@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/settings/app_settings.dart';
+import '../../../core/app_version.dart';
+import '../../../core/update_service.dart';
+import '../../../core/update_banner.dart';
 import '../../../core/utils/responsive.dart';
 import '../../player/presentation/player_screen.dart';
 import '../domain/discovery_event.dart';
@@ -77,7 +80,9 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
     if (Platform.isWindows || Platform.isLinux) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('El navegador embebido aún no está soportado en esta plataforma (v1).'),
+          content: Text(
+            'El navegador embebido aún no está soportado en esta plataforma (v1).',
+          ),
           duration: Duration(seconds: 3),
         ),
       );
@@ -130,6 +135,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text('Versión ${AppVersion.full}'),
             const Text(
               'Flux es un reproductor y escáner de streams para redes locales '
               'que te permite enviar y recibir emisiones fácilmente entre tus dispositivos.',
@@ -147,6 +153,21 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
           ],
         ),
         actions: [
+          if (UpdateService.supported)
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await UpdateService.instance.check();
+                if (!mounted) return;
+                final message = UpdateService.instance.message;
+                if (message != null) {
+                  ScaffoldMessenger.of(
+                    this.context,
+                  ).showSnackBar(SnackBar(content: Text(message)));
+                }
+              },
+              child: const Text('Buscar actualizaciones'),
+            ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cerrar'),
@@ -172,7 +193,10 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
         titleSpacing: 20,
         title: Row(
           children: [
-            Icon(Icons.bolt_rounded, color: Theme.of(context).colorScheme.primary),
+            Icon(
+              Icons.bolt_rounded,
+              color: Theme.of(context).colorScheme.primary,
+            ),
             const SizedBox(width: 8),
             const Text('Flux', style: TextStyle(fontWeight: FontWeight.w700)),
           ],
@@ -215,15 +239,16 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: state.isScanning ? controller.stop : controller.start,
-        icon: Icon(
-          state.isScanning ? Icons.stop_rounded : Icons.radar_rounded,
-        ),
+        icon: Icon(state.isScanning ? Icons.stop_rounded : Icons.radar_rounded),
         label: Text(state.isScanning ? 'Detener' : 'Buscar'),
       ),
       body: Column(
         children: [
+          const UpdateBanner(),
           _ScanStatus(state: state),
-          Expanded(child: _Content(state: state, onPlay: _play, onManual: _openManual)),
+          Expanded(
+            child: _Content(state: state, onPlay: _play, onManual: _openManual),
+          ),
         ],
       ),
     );
@@ -287,8 +312,11 @@ class _ScanStatus extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 15, color: Color(0xFFE0B33C)),
+                const Icon(
+                  Icons.info_outline_rounded,
+                  size: 15,
+                  color: Color(0xFFE0B33C),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -342,7 +370,8 @@ class _Content extends ConsumerWidget {
         final candidate = state.candidates[index];
         return StreamCard(
           candidate: candidate,
-          isBest: index == 0 &&
+          isBest:
+              index == 0 &&
               candidate.metrics != null &&
               state.candidates.length > 1,
           onPlay: () => onPlay(candidate),
@@ -365,10 +394,7 @@ class _Searching extends StatelessWidget {
         children: [
           const _PulsingRadar(),
           const SizedBox(height: 24),
-          Text(
-            'Rastreando tu red…',
-            style: theme.textTheme.titleMedium,
-          ),
+          Text('Rastreando tu red…', style: theme.textTheme.titleMedium),
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -461,7 +487,9 @@ class _EmptyState extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(
-                noNetwork ? Icons.wifi_off_rounded : Icons.travel_explore_rounded,
+                noNetwork
+                    ? Icons.wifi_off_rounded
+                    : Icons.travel_explore_rounded,
                 size: 48,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -484,13 +512,21 @@ class _EmptyState extends StatelessWidget {
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Hint('Empieza a transmitir en el teléfono antes de buscar.'),
-                    _Hint('Los dos dispositivos deben estar en el mismo Wi-Fi, '
-                        'no en la red de invitados.'),
-                    _Hint('Si tu router tiene aislamiento de clientes activado, '
-                        'ningún escaneo funcionará: desactívalo.'),
-                    _Hint('¿Ya sabes la dirección? Escríbela directamente.',
-                        last: true),
+                    _Hint(
+                      'Empieza a transmitir en el teléfono antes de buscar.',
+                    ),
+                    _Hint(
+                      'Los dos dispositivos deben estar en el mismo Wi-Fi, '
+                      'no en la red de invitados.',
+                    ),
+                    _Hint(
+                      'Si tu router tiene aislamiento de clientes activado, '
+                      'ningún escaneo funcionará: desactívalo.',
+                    ),
+                    _Hint(
+                      '¿Ya sabes la dirección? Escríbela directamente.',
+                      last: true,
+                    ),
                   ],
                 ),
               ),
@@ -571,7 +607,9 @@ class _Toggle extends StatelessWidget {
         Icon(
           icon,
           size: 20,
-          color: enabled ? theme.colorScheme.primary : theme.colorScheme.outline,
+          color: enabled
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outline,
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -590,7 +628,9 @@ class _Toggle extends StatelessWidget {
         ),
         Icon(
           enabled ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
-          color: enabled ? theme.colorScheme.primary : theme.colorScheme.outline,
+          color: enabled
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outline,
         ),
       ],
     );

@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -10,9 +11,12 @@ plugins {
 val signingProperties = Properties()
 val signingFile = rootProject.file("key.properties")
 if (signingFile.exists()) signingFile.inputStream().use { signingProperties.load(it) }
-if (System.getenv("FLUX_RELEASE_BUILD") == "1" && !signingFile.exists()) {
+val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+if ((System.getenv("FLUX_RELEASE_BUILD") == "1" || isReleaseTask) && !signingFile.exists()) {
     throw GradleException("Publishing requires android/key.properties and a release keystore.")
 }
+val storeBuild = (project.findProperty("dart-defines") as String?)?.split(",")
+    ?.any { runCatching { String(Base64.getDecoder().decode(it)) == "STORE_BUILD=true" }.getOrDefault(false) } ?: false
 
 android {
     signingConfigs {
@@ -39,24 +43,42 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.aur.flux"
+        applicationId = "com.auralix.flux"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        require(flutter.versionCode in 1..209989999) { "Build exceeds Android versionCode range" }
+        versionCode = 100000 + flutter.versionCode * 10
         versionName = flutter.versionName
+        buildConfigField("boolean", "DIRECT_DIST", (!storeBuild).toString())
+    }
+    buildFeatures { buildConfig = true }
+    if (!storeBuild) {
+        for (type in listOf("debug", "profile", "release")) {
+            sourceSets.getByName(type).manifest.srcFile("src/direct/AndroidManifest.xml")
+        }
     }
 
     buildTypes {
         release {
-            // Local development may use debug; the publication pipeline requires a release key.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = if (signingFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }
+
+// Preserve ordering when users switch between universal and split APKs.
+@Suppress("DEPRECATION")
+android.applicationVariants.configureEach {
+    val base = versionCode
+    outputs.configureEach {
+        val apk = this as com.android.build.gradle.api.ApkVariantOutput
+        val abi = apk.getFilter(com.android.build.VariantOutput.FilterType.ABI)
+        apk.versionCodeOverride = base + (mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 4)[abi] ?: 0)
+    }
+}
+
+dependencies { implementation("androidx.core:core:1.13.1") }
 
 flutter {
     source = "../.."

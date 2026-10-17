@@ -20,7 +20,7 @@ function Get-ReleaseVersion([string]$Root = (Get-ReleaseRoot)) {
     $matches = [regex]::Matches($content, '(?m)^version:\s*((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\+([1-9]\d*)\s*$')
     if ($matches.Count -ne 1) { throw 'pubspec.yaml debe contener una version X.Y.Z+N unica (N positivo).' }
     $build = [int]$matches[0].Groups[2].Value
-    if ($build -gt 2100000000) { throw 'El build supera el limite de Android.' }
+    if ($build -gt 209989999) { throw 'El build supera el limite de Android.' }
     $version = $matches[0].Groups[1].Value
     return [pscustomobject]@{ Version = $version; Build = $build; Full = "$version+$build"; Tag = "v$version" }
 }
@@ -80,18 +80,20 @@ function Assert-ReleaseBundle([string]$Root, [string]$DistDir, $Version, [string
         if ($artifact.name -notin $allowed) { throw 'Artefacto no permitido en el paquete.' }
         $path = Join-Path $DistDir $artifact.name
         if (!(Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0 -or
+            (Get-Item -LiteralPath $path).Length -ne $artifact.size -or
+            $artifact.url -cne "https://github.com/$Repository/releases/download/$($Version.Tag)/$($artifact.name)" -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $artifact.sha256) {
             throw "Artefacto ausente o modificado: $($artifact.name)."
         }
     }
-    foreach ($name in @('RELEASE_NOTES.md', 'SHA256SUMS.txt')) {
-        $expected = if ($name -eq 'RELEASE_NOTES.md') { $meta.notesSha256 } else { $meta.sumsSha256 }
+    foreach ($name in @('RELEASE_NOTES.md', 'SHA256SUMS.txt', 'version.json')) {
+        $expected = if ($name -eq 'RELEASE_NOTES.md') { $meta.notesSha256 } elseif ($name -eq 'version.json') { $meta.manifestSha256 } else { $meta.sumsSha256 }
         if ((Get-FileHash -LiteralPath (Join-Path $DistDir $name) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
             throw "$name fue modificado despues de preparar la release."
         }
     }
     $actual = @(Get-ChildItem -LiteralPath $DistDir -File | ForEach-Object Name)
-    if (@(Compare-Object ($names + @('RELEASE_NOTES.md', 'SHA256SUMS.txt', 'release-meta.json')) $actual).Count) {
+    if (@(Compare-Object ($names + @('RELEASE_NOTES.md', 'SHA256SUMS.txt', 'release-meta.json', 'version.json')) $actual).Count) {
         throw 'El directorio contiene archivos ajenos al paquete.'
     }
     return $meta

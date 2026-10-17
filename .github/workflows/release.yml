@@ -1,9 +1,38 @@
 name: Flux Release
 
-# A single manual trigger avoids racing local releases against tag-push builds.
+# Called by automatic versioning or manually; tag pushes do not duplicate builds.
 on:
+  workflow_call:
+    inputs:
+      draft:
+        type: boolean
+        default: true
+      split:
+        type: boolean
+        default: false
+      ref:
+        type: string
+        required: true
+      windows:
+        type: boolean
+        default: true
+    secrets:
+      PUBLIC_RELEASE_TOKEN:
+        required: true
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
+      ANDROID_STORE_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
+      ref:
+        description: Source tag or commit to rebuild (empty uses the selected branch)
+        type: string
+        default: ''
       draft:
         description: Keep the release as a draft for review
         type: boolean
@@ -12,6 +41,10 @@ on:
         description: Also build APKs for each ABI
         type: boolean
         default: false
+      windows:
+        description: Include the complete Windows ZIP
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -22,22 +55,23 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ${{ inputs.windows && 'windows-latest' || 'ubuntu-latest' }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.3'
+          flutter-version: '3.47.7'
           channel: stable
           cache: true
       - name: Check release scripts
@@ -71,13 +105,14 @@ jobs:
           GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
           RELEASE_DRAFT: ${{ inputs.draft }}
           RELEASE_SPLIT: ${{ inputs.split }}
+          RELEASE_WINDOWS: ${{ inputs.windows }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          ./scripts/build_release.ps1 -Publish -Draft:($env:RELEASE_DRAFT -eq 'true') -Split:($env:RELEASE_SPLIT -eq 'true')
+          ./scripts/build_release.ps1 -Publish -Draft:($env:RELEASE_DRAFT -eq 'true') -Split:($env:RELEASE_SPLIT -eq 'true') -Windows:($env:RELEASE_WINDOWS -eq 'true')
       - name: Retain release bundle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: flux-release
           path: dist/

@@ -1,0 +1,79 @@
+name: Versionado automático
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Incremento de versión
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flux-auto-version
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      ref: ${{ steps.commit.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Validate release tooling
+        shell: pwsh
+        run: |
+          ./scripts/sync_version.ps1 -Check
+          ./scripts/test_release.ps1
+      - run: python3 scripts/test_auto_version.py
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter test
+      - name: Calculate and apply version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+        run: python3 scripts/auto_version.py apply --bump "$BUMP" >> "$GITHUB_OUTPUT"
+      - name: Validate generated version
+        if: steps.version.outputs.release == 'true'
+        shell: pwsh
+        run: ./scripts/sync_version.ps1 -Check
+      - name: Commit and tag the exact tested source
+        id: commit
+        if: steps.version.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pubspec.yaml assets/changelog.json lib/core/app_version.dart
+          git commit -m "chore(release): $TAG [skip ci]"
+          git tag -a "$TAG" -m "Flux $TAG"
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.version.outputs.ref }}
+      draft: false
+      split: true
+      windows: true
+    secrets: inherit

@@ -28,6 +28,13 @@ Assert-ReleaseClean $root
 if ($Publish) {
     $null = Get-Command gh -ErrorAction Stop
     Invoke-ReleaseCommand gh @('auth', 'status', '--hostname', 'github.com') | Out-Host
+    if (git tag -l $version.Tag) {
+        throw "El tag $($version.Tag) ya existe localmente. No se puede publicar una versión duplicada."
+    }
+    $existingRelease = gh release view $version.Tag --repo $repo --json isDraft 2>$null
+    if ($LASTEXITCODE -eq 0 -and $existingRelease) {
+        throw "La release $($version.Tag) ya existe en GitHub ($repo). Cancela la publicación o incrementa la versión."
+    }
 }
 
 Push-Location $root
@@ -79,7 +86,7 @@ try {
     $destination = (Invoke-ReleaseCommand gh @('repo', 'view', $repo, '--json', 'nameWithOwner,isPrivate') | Out-String) | ConvertFrom-Json
     if ($destination.isPrivate -or $destination.nameWithOwner -ine $repo) { throw 'El destino debe ser el repositorio publico configurado.' }
     $assets = @($meta.artifacts | ForEach-Object { Join-Path $dist $_.name })
-    $assets += @((Join-Path $dist 'SHA256SUMS.txt'), (Join-Path $dist 'release-meta.json'))
+    $assets += @((Join-Path $dist 'SHA256SUMS.txt'), (Join-Path $dist 'release-meta.json'), (Join-Path $dist 'version.json'))
     # First upload as a draft. A failed upload never exposes a partial release.
     Invoke-ReleaseCommand gh (@('release', 'create', $version.Tag) + $assets + @(
         '--repo', $repo, '--draft', '--title', "Flux $($version.Version)",

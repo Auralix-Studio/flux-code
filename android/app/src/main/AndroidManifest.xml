@@ -1,6 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Único permiso que necesita Flux: hablar por red. No pide almacenamiento,
-         ni ubicación, ni nada que no haga falta para ver un video de la LAN. -->
+    <!-- Network access for streams and update checks. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 

@@ -7,7 +7,7 @@ El código permanece en su repositorio privado. La web y los binarios se distrib
 - Mantener origin apuntando al código privado. El script rechaza que el destino público coincida con origin.
 - PowerShell 7, Flutter compatible con pubspec.lock, Git, SDK Android y Java 17. Windows requiere las herramientas de compilación de Flutter.
 - Crear android/key.properties con storeFile, storePassword, keyAlias y keyPassword, y usar el keystore de distribución. Conservar siempre la misma firma para las actualizaciones.
-- Antes de compilar, revisar las notas y guardar los cambios en un commit. No se crean commits automáticamente.
+- Antes de compilar localmente, revisar las notas y guardar los cambios en un commit. El script local no crea commits.
 - Para publicar localmente, autenticar gh con acceso de escritura al repositorio público.
 
 ## Flujo
@@ -32,8 +32,20 @@ La publicación comprueba que el destino sea público. No ejecuta git push ni en
 Se cargan primero todos los archivos en un borrador. Sin -Draft se publica solo después de una carga satisfactoria. No se sobrescriben releases existentes. Si falla una carga, revisar el borrador antes de repetir. Un borrador aprobado puede publicarse desde GitHub.
 
 ## GitHub Actions
-El workflow Release es manual. Configurar en el repositorio privado:
+`auto-version.yml` valida pruebas en `main`, calcula la versión a partir de Conventional Commits, conserva las notas revisadas y crea un commit/tag privado mediante push atómico. `feat:` incrementa minor, `fix:` patch, `!` o `BREAKING CHANGE:` major. Los cambios de documentación, CI y pruebas por sí solos no publican. La rama `beta` no publica. `ci.yml` valida los PR a main/beta. Todos usan Flutter 3.47.7.
+
+El flujo llama a `Release` con el commit exacto y publica Android y el ZIP Windows tras subirlos como borrador. Android y Windows se construyen secuencialmente; la ejecución manual permite omitir Windows. También se puede ejecutar `Release` manualmente con `draft=true`, y usar su entrada `ref` para recuperar un tag/commit ya preparado sin incrementar otra vez la versión. Configurar en el repositorio privado:
 - PUBLIC_RELEASE_TOKEN: token con Contents: write en el repositorio público. GITHUB_TOKEN no alcanza para otro repositorio.
 - ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, ANDROID_STORE_PASSWORD.
+
+GitHub Actions necesita permiso de escritura para el commit/tag privado y las reglas de protección de main deben permitirlo. El token público no cambia origin ni recibe el historial privado. La web despliega automáticamente al publicar la release; recupera y valida su `version.json` en cada despliegue.
+
+## Identidad y actualización
+
+El identificador es `com.auralix.flux`; el namespace Kotlin sigue siendo `com.aur.flux`. Android trata la edición antigua como otra aplicación: no hay migración automática de sus datos. Los archivos públicos conservan nombres `flux-vX.Y.Z-universal.apk` y sufijos de arquitectura. Todas las arquitecturas usan códigos `100000 + build * 10 + ABI`, con build máximo 209989999.
+
+La app comprueba actualizaciones y ofrece búsqueda manual desde la pantalla principal. Android verifica SHA-256, tamaño, paquete, firma y versión antes de solicitar la instalación. Windows abre el ZIP validado por el manifiesto; su instalación y comprobación local del hash son manuales. `min_build` en `scripts/release_policy.json` muestra un aviso, no impone un bloqueo total. `STORE_BUILD=true` excluye la instalación directa y su permiso Android.
+
+El bundle incluye `version.json` con hashes y URLs inmutables, además de `release-meta.json` y `SHA256SUMS.txt`. Una release pública nueva necesita un tag X.Y.Z nuevo; incrementar solo el build no permite sobrescribir un tag ya publicado.
 
 Las pruebas usan simuladores y no descargan ni publican. El workflow y una compilación firmada real deben validarse tras configurar las claves. El ZIP de Windows incluye el bundle completo; no incluye el instalador EXE. Las apps de TV de Flux tienen su propio empaquetado y no están incluidas en este flujo.

@@ -33,6 +33,11 @@ function gh {
     $global:LASTEXITCODE = 0
     $global:FluxTestCalls.Add('gh ' + ($args -join ' '))
     if ($args[0] -eq 'repo') { return '{"nameWithOwner":"example/flux","isPrivate":false}' }
+    if ($args[0] -eq 'release' -and $args[1] -eq 'view') { return '{"isDraft":false,"tagName":"v1.2.3"}' }
+    if ($args[0] -eq 'api' -and $args[1] -ne '--method') {
+        $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"build":7}'))
+        return ('{"sha":"testsha","content":"' + $content + '"}')
+    }
     if ($global:FluxTestUploadFails -and $args[0] -eq 'release' -and $args[1] -eq 'create') {
         $global:LASTEXITCODE = 1
     }
@@ -65,6 +70,7 @@ try {
     Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $fixtureRoot 'scripts')
     }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release_policy.json') -Destination (Join-Path $fixtureRoot 'scripts')
     Reset-Fixture
     $version = Get-ReleaseVersion $fixtureRoot
     Assert-Equal $version.Full '1.2.3+8' 'Initial version'
@@ -115,6 +121,18 @@ try {
     Assert-Equal $metadata.artifacts[0].sha256 (Get-FileHash $artifact).Hash.ToLowerInvariant() 'Hash mismatch'
     Pass 'notes, checksums and metadata describe the same artifact'
 
+    $manifestPath = Join-Path $package 'version.json'
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    $manifest = $manifestText | ConvertFrom-Json
+    Assert-Equal $manifest.schema 1 'Updater schema'
+    Assert-Equal $manifest.package 'com.auralix.flux' 'Android package identity'
+    Assert-Equal $manifest.tag $version.Tag 'Manifest tag'
+    Assert-Equal $manifest.assets.'android-universal'.sha256 $metadata.artifacts[0].sha256 'Updater hash'
+    Write-ReleaseText $manifestPath '{}'
+    Assert-Throws { Assert-ReleaseBundle $fixtureRoot $package $version $global:FluxTestCommit 'example/flux' } 'version.json'
+    Write-ReleaseText $manifestPath $manifestText
+    Pass 'updater identity matches the APK and altered manifests cannot be published'
+
     Assert-Throws { Assert-ReleaseBundle $fixtureRoot $package $version ('f' * 40) 'example/flux' } 'commit'
     Pass 'a bundle from another commit is rejected'
     Write-ReleaseText $artifact 'modified'
@@ -136,7 +154,7 @@ try {
     # Exercise publication with fake commands only: no network or real Git tags.
     $publishPackage = Join-Path $fixtureRoot 'dist/v1.2.3+8'
     $null = New-Item -ItemType Directory -Path $publishPackage -Force
-    foreach ($name in @('flux-v1.2.3-universal.apk', 'RELEASE_NOTES.md', 'SHA256SUMS.txt', 'release-meta.json')) {
+    foreach ($name in @('flux-v1.2.3-universal.apk', 'RELEASE_NOTES.md', 'SHA256SUMS.txt', 'release-meta.json', 'version.json')) {
         Copy-Item -LiteralPath (Join-Path $package $name) -Destination $publishPackage
     }
     $global:FluxTestPublish = $true

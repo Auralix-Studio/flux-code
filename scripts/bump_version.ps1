@@ -23,7 +23,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Set') {
     $next = $parts -join '.'
 }
 $build = $old.Build + 1
-if ($build -gt 2100000000) { throw 'El build supera el limite de Android.' }
+if ($build -gt 209989999) { throw 'El build supera el limite de Android.' }
 $changelogPath = Join-Path $root 'assets/changelog.json'
 $entries = @(Get-Content -LiteralPath $changelogPath -Raw | ConvertFrom-Json)
 if ($next -ne $old.Version -and @($entries | Where-Object version -EQ $next).Count) {

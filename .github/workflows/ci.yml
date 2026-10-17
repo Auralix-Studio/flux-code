@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, beta]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flux-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Validate release scripts
+        shell: pwsh
+        run: |
+          ./scripts/sync_version.ps1 -Check
+          ./scripts/test_release.ps1
+      - run: python3 scripts/test_auto_version.py
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter test
