@@ -16,17 +16,6 @@ on:
       windows:
         type: boolean
         default: true
-    secrets:
-      PUBLIC_RELEASE_TOKEN:
-        required: true
-      ANDROID_KEYSTORE_BASE64:
-        required: true
-      ANDROID_KEY_ALIAS:
-        required: true
-      ANDROID_KEY_PASSWORD:
-        required: true
-      ANDROID_STORE_PASSWORD:
-        required: true
   workflow_dispatch:
     inputs:
       ref:
@@ -83,10 +72,14 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($name in @('KEYSTORE_BASE64', 'KEY_ALIAS', 'KEY_PASSWORD', 'STORE_PASSWORD')) {
+          if ([string]::IsNullOrWhiteSpace($env:KEYSTORE_BASE64)) {
+            Write-Warning "Sin ANDROID_KEYSTORE_BASE64: se omite la creación de release.jks"
+            exit 0
+          }
+          foreach ($name in @('KEY_ALIAS', 'KEY_PASSWORD', 'STORE_PASSWORD')) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing secret: $name" }
           }
           [IO.File]::WriteAllBytes('android/app/release.jks', [Convert]::FromBase64String($env:KEYSTORE_BASE64))
@@ -102,7 +95,7 @@ jobs:
           [IO.File]::WriteAllText('android/key.properties', $properties, [Text.UTF8Encoding]::new($false))
       - name: Build and publish
         env:
-          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN || secrets.ORG_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           RELEASE_DRAFT: ${{ inputs.draft }}
           RELEASE_SPLIT: ${{ inputs.split }}
           RELEASE_WINDOWS: ${{ inputs.windows }}
