@@ -28,13 +28,6 @@ Assert-ReleaseClean $root
 if ($Publish) {
     $null = Get-Command gh -ErrorAction Stop
     Invoke-ReleaseCommand gh @('auth', 'status', '--hostname', 'github.com') | Out-Host
-    if (git tag -l $version.Tag) {
-        throw "El tag $($version.Tag) ya existe localmente. No se puede publicar una versión duplicada."
-    }
-    $existingRelease = gh release view $version.Tag --repo $repo --json isDraft 2>$null
-    if ($LASTEXITCODE -eq 0 -and $existingRelease) {
-        throw "La release $($version.Tag) ya existe en GitHub ($repo). Cancela la publicación o incrementa la versión."
-    }
 }
 
 Push-Location $root
