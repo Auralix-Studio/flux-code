@@ -50,6 +50,22 @@ jobs:
       run:
         shell: pwsh
     steps:
+      # Falla en segundos (antes de instalar Java/Flutter) si faltan secretos.
+      - name: Check release secrets
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN || secrets.ORG_GITHUB_TOKEN }}
+        run: |
+          $missing = @('KEYSTORE_BASE64', 'KEY_ALIAS', 'KEY_PASSWORD', 'STORE_PASSWORD', 'RELEASE_TOKEN') |
+            Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+          if ($missing) {
+            Write-Output "::error title=Faltan secretos de release::Configura en Settings -> Secrets and variables -> Actions: ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, ANDROID_STORE_PASSWORD y PUBLIC_RELEASE_TOKEN (Contents: write sobre el repositorio público). Faltan: $($missing -join ', ')"
+            exit 1
+          }
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
