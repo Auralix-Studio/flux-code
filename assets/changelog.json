@@ -1,1 +1,45 @@
-[{"version":"1.0.0","date":"2026-09-30","title":"Flux 1.0.0","changes":[{"type":"improvement","description":"PENDIENTE: revisar las funciones y pruebas en dispositivos antes de la primera publicación."}]}]
+[
+  {
+    "version": "1.0.0",
+    "date": "2026-10-17",
+    "title": "Flux 1.0.0",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "add PowerShell script for automated release building and publishing"
+      },
+      {
+        "type": "feature",
+        "description": "add stream discovery UI and automated release workflow scripts"
+      },
+      {
+        "type": "feature",
+        "description": "implement casting receiver service and release automation scripts"
+      },
+      {
+        "type": "feature",
+        "description": "implement core video player controller with LAN stream optimization and pre-buffering support"
+      },
+      {
+        "type": "feature",
+        "description": "add support for webOS platform with new JS interface and SSAP discovery client"
+      },
+      {
+        "type": "feature",
+        "description": "scaffold Flutter application with webOS support, media discovery, and player features"
+      },
+      {
+        "type": "feature",
+        "description": "implement discovery screen with automated scanning and stream selection UI"
+      },
+      {
+        "type": "feature",
+        "description": "implement player screen with immersive playback, stream monitoring, and LG webOS discovery support"
+      },
+      {
+        "type": "feature",
+        "description": "initialize Flutter project with cross-platform support for Android, Windows, and webOS"
+      }
+    ]
+  }
+]
