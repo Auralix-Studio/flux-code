@@ -175,6 +175,7 @@ try {
     Assert-Equal @($global:FluxTestCalls | Where-Object { $_ -like 'gh release edit*' }).Count 0 'Never promote after a failed upload'
     Pass 'failed upload cannot publish a partial release'
     Write-Host "All $script:passed offline release tests passed."
+    $global:LASTEXITCODE = 0
 } finally {
     Remove-Variable FluxTestDirty,FluxTestRemote,FluxTestCommit,FluxTestPublish,FluxTestUploadFails,FluxTestCalls -Scope Global -ErrorAction SilentlyContinue
     # Delete only this test's UUID directory beneath this repository's dist/.
@@ -185,4 +186,5 @@ try {
         throw 'Refusing to clean an unexpected test directory.'
     }
     if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
+    $global:LASTEXITCODE = 0
 }
