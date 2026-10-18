@@ -66,6 +66,11 @@ jobs:
             Write-Output "::error title=Faltan secretos de release::Configura en Settings -> Secrets and variables -> Actions: ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, ANDROID_STORE_PASSWORD y PUBLIC_RELEASE_TOKEN (Contents: write sobre el repositorio público). Faltan: $($missing -join ', ')"
             exit 1
           }
+      # Flutter reescribe windows/flutter/generated_* con LF; con autocrlf=true
+      # git los marca como modificados y build_release.ps1 se niega a publicar.
+      - name: Keep LF line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
