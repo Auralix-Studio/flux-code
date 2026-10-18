@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.0",
+    "date": "2026-10-17",
+    "title": "Flux 1.1.0",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "add GitHub Actions workflow for automated application releases"
+      }
+    ]
+  },
+  {
     "version": "1.0.0",
     "date": "2026-10-17",
     "title": "Flux 1.0.0",
